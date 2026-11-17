@@ -17,7 +17,12 @@ Method (derived from this kit's own practice data, nothing else):
   over the comparables (Gaussian kernel, bandwidth 1.5 in log units,
   centred on this case's own log hour-1 print, clamped to the
   comparables' hour-1 range so a record launch extrapolates flat,
-  like ELDEN RING / Cyberpunk 2077 did).  The median is the fit at
+  like ELDEN RING / Cyberpunk 2077 did).  When the kernel's
+  effective sample size at the centre is thin (below 20 launches),
+  the local slope is shrunk toward 0 -- the pooled shape -- in
+  proportion to the shortfall, anchored at the weighted mean, so a
+  record or tiny launch does not inherit a slope fitted on a
+  handful of comparables.  The median is the fit at
   the case's hour-1 print; the spread is the weighted interquartile
   range of the fit's residuals, floored at 0.15 and capped at 0.5 in
   log units, so the 5%-95% band stays honest without being blown out
@@ -143,6 +148,14 @@ def local_fit(points: list[tuple[float, float]], centre: float) -> tuple[float, 
     sxx = sum(w * (x - mean_x) ** 2 for w, (x, _) in zip(weights, points))
     sxy = sum(w * (x - mean_x) * (y - mean_y) for w, (x, y) in zip(weights, points))
     slope = sxy / sxx if sxx > 1e-9 else 0.0
+    # Shrink the local slope toward 0 (the pooled shape) when the
+    # kernel's effective sample size at the centre is thin: a slope
+    # fitted on a handful of launches is noise, not signal.  The
+    # shrink is anchored at the weighted mean, so the fit still
+    # passes through (mean_x, mean_y); at ESS >= 20 it is inactive.
+    ess = total * total / sum(w * w for w in weights)
+    shrink = min(1.0, ess / 20.0)
+    slope *= shrink
     intercept = mean_y - slope * mean_x
     predicted = intercept + slope * centre
     residuals = [(y - (intercept + slope * x), w) for w, (x, y) in zip(weights, points)]
